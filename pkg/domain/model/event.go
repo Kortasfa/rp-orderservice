@@ -20,3 +20,21 @@ type OrderItemChanged struct {
 func (e OrderItemChanged) Type() string {
 	return "OrderItemChanged"
 }
+
+type OrderStatusChanged struct {
+	OrderID        uuid.UUID
+	Status         OrderStatus
+	PreviousStatus OrderStatus
+}
+
+func (e OrderStatusChanged) Type() string {
+	return "OrderStatusChanged"
+}
+
+type OrderDeleted struct {
+	OrderID uuid.UUID
+}
+
+func (e OrderDeleted) Type() string {
+	return "OrderDeleted"
+}

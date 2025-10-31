@@ -67,13 +67,49 @@ func (o orderService) CreateOrder(customerID uuid.UUID) (uuid.UUID, error) {
 }
 
 func (o orderService) DeleteOrder(orderID uuid.UUID) error {
-	//TODO implement me
-	panic("implement me")
+	order, err := o.repo.Find(orderID)
+	if err != nil {
+		return err
+	}
+
+	currentTime := time.Now()
+	order.DeletedAt = &currentTime
+	order.UpdatedAt = currentTime
+
+	err = o.repo.Store(order)
+	if err != nil {
+		return err
+	}
+
+	return o.dispatcher.Dispatch(model.OrderDeleted{
+		OrderID: orderID,
+	})
 }
 
 func (o orderService) SetStatus(orderID uuid.UUID, status model.OrderStatus) error {
-	//TODO implement me
-	panic("implement me")
+	order, err := o.repo.Find(orderID)
+	if err != nil {
+		return err
+	}
+
+	if order.Status == status {
+		return nil
+	}
+
+	previousStatus := order.Status
+	order.Status = status
+	order.UpdatedAt = time.Now()
+
+	err = o.repo.Store(order)
+	if err != nil {
+		return err
+	}
+
+	return o.dispatcher.Dispatch(model.OrderStatusChanged{
+		OrderID:        orderID,
+		Status:         status,
+		PreviousStatus: previousStatus,
+	})
 }
 
 func (o orderService) AddItem(orderID uuid.UUID, productID uuid.UUID, price float64) (uuid.UUID, error) {
@@ -107,6 +143,37 @@ func (o orderService) AddItem(orderID uuid.UUID, productID uuid.UUID, price floa
 }
 
 func (o orderService) DeleteItem(orderID uuid.UUID, itemID uuid.UUID) error {
-	//TODO implement me
-	panic("implement me")
+	order, err := o.repo.Find(orderID)
+	if err != nil {
+		return err
+	}
+
+	if order.Status != model.Open {
+		return ErrInvalidOrderStatus
+	}
+
+	itemIndex := -1
+	for i, item := range order.Items {
+		if item.ID == itemID {
+			itemIndex = i
+			break
+		}
+	}
+
+	if itemIndex == -1 {
+		return errors.New("item not found")
+	}
+
+	order.Items = append(order.Items[:itemIndex], order.Items[itemIndex+1:]...)
+	order.UpdatedAt = time.Now()
+
+	err = o.repo.Store(order)
+	if err != nil {
+		return err
+	}
+
+	return o.dispatcher.Dispatch(model.OrderItemChanged{
+		OrderID:      orderID,
+		RemovedItems: []uuid.UUID{itemID},
+	})
 }

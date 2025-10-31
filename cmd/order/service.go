@@ -10,7 +10,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
 
-	api "order/api/server/orderinternal"
+	api "order/order/api/server/orderinternal"
 	"order/pkg/infrastructure/transport"
 )
 
