@@ -1,0 +1,17 @@
+syntax = "proto3";
+package Notification;
+
+option go_package = "/.;notificationinternal";
+
+service NotificationInternalService {
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+}
+
+message SendNotificationRequest {
+  string userID = 1;
+  string message = 2;
+}
+
+message SendNotificationResponse {
+  bool success = 1;
+}

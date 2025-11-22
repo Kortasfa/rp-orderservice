@@ -1,30 +1,35 @@
 package main
 
 import (
-"context"
-"errors"
-"net"
-"net/http"
+	"context"
+	"errors"
+	"net"
+	"net/http"
 
-"gitea.xscloud.ru/xscloud/golib/pkg/application/logging"
-libio "gitea.xscloud.ru/xscloud/golib/pkg/common/io"
-"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/mysql"
-"github.com/gorilla/mux"
-"github.com/urfave/cli/v2"
-"golang.org/x/sync/errgroup"
-"google.golang.org/grpc"
+	"gitea.xscloud.ru/xscloud/golib/pkg/application/logging"
+	libio "gitea.xscloud.ru/xscloud/golib/pkg/common/io"
+	libamqp "gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/amqp"
+	"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/mysql"
+	"github.com/gorilla/mux"
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
-"order/api/server/orderinternal"
-appservice "order/pkg/application/service"
-inframysql "order/pkg/infrastructure/mysql"
-"order/pkg/infrastructure/mysql/query"
-"order/pkg/infrastructure/transport"
-"order/pkg/infrastructure/transport/middlewares"
+	"order/api/server/orderinternal"
+	appservice "order/pkg/application/service"
+	infraamqp "order/pkg/infrastructure/amqp"
+	"order/pkg/infrastructure/client"
+	inframysql "order/pkg/infrastructure/mysql"
+	"order/pkg/infrastructure/mysql/query"
+	"order/pkg/infrastructure/transport"
+	"order/pkg/infrastructure/transport/middlewares"
 )
 
 type serviceConfig struct {
 	Service  Service  `envconfig:"service"`
 	Database Database `envconfig:"database" required:"true"`
+	AMQP     AMQP     `envconfig:"amqp" required:"true"`
 }
 
 func service(logger logging.Logger) *cli.Command {
@@ -52,9 +57,62 @@ func service(logger logging.Logger) *cli.Command {
 			libUoW := mysql.NewUnitOfWork(databaseConnectionPool, inframysql.NewRepositoryProvider)
 			uow := inframysql.NewUnitOfWork(libUoW)
 
+			productConn, err := grpc.NewClient(
+				cnf.Service.ProductServiceAddress,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			if err != nil {
+				return err
+			}
+			closer.AddCloser(productConn)
+
+			productClient := client.NewProductClient(productConn)
+
+			paymentConn, err := grpc.NewClient(
+				cnf.Service.PaymentServiceAddress,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			if err != nil {
+				return err
+			}
+			closer.AddCloser(paymentConn)
+
+			paymentClient := client.NewPaymentClient(paymentConn)
+
+			notificationConn, err := grpc.NewClient(
+				cnf.Service.NotificationServiceAddress,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			if err != nil {
+				return err
+			}
+			closer.AddCloser(notificationConn)
+
+			notificationClient := client.NewNotificationClient(notificationConn)
+
+			amqpConnection := newAMQPConnection(cnf.AMQP, logger)
+			amqpProducer := amqpConnection.Producer(
+				&libamqp.ExchangeConfig{
+					Name:    "domain_events",
+					Kind:    "topic",
+					Durable: true,
+				},
+				nil,
+				nil,
+			)
+			err = amqpConnection.Start()
+			if err != nil {
+				return err
+			}
+			closer.AddCloser(libio.CloserFunc(func() error {
+				return amqpConnection.Stop()
+			}))
+
+			eventPublisher := infraamqp.NewEventPublisher(amqpProducer)
+
 			orderInternalAPI := transport.NewOrderInternalAPI(
-query.NewOrderQueryService(databaseConnector.TransactionalClient()),
-				appservice.NewOrderService(uow),
+				query.NewOrderQueryService(databaseConnector.TransactionalClient()),
+				appservice.NewOrderService(uow, productClient, paymentClient, notificationClient, eventPublisher),
 			)
 
 			errGroup := errgroup.Group{}
@@ -64,11 +122,11 @@ query.NewOrderQueryService(databaseConnector.TransactionalClient()),
 					return err
 				}
 				grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
-middlewares.NewGRPCLoggingMiddleware(logger),
-))
+					middlewares.NewGRPCLoggingMiddleware(logger),
+				))
 				orderinternal.RegisterOrderInternalServiceServer(grpcServer, orderInternalAPI)
 				graceCallback(c.Context, logger, cnf.Service.GracePeriod, func(_ context.Context) error {
-grpcServer.GracefulStop()
+					grpcServer.GracefulStop()
 					return nil
 				})
 				return grpcServer.Serve(listener)

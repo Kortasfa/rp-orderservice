@@ -1,0 +1,28 @@
+syntax = "proto3";
+package Payment;
+
+option go_package = "/.;paymentserviceinternal";
+
+service PaymentServiceInternal {
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc ProcessPayment(ProcessPaymentRequest) returns (ProcessPaymentResponse);
+}
+
+message GetBalanceRequest {
+  string userID = 1;
+}
+
+message GetBalanceResponse {
+  double balance = 1;
+}
+
+message ProcessPaymentRequest {
+  string orderID = 1;
+  string userID = 2;
+  double amount = 3;
+}
+
+message ProcessPaymentResponse {
+  bool success = 1;
+  string transactionID = 2;
+}

@@ -7,22 +7,52 @@ import (
 
 	appmodel "order/pkg/application/model"
 	"order/pkg/domain/service"
+	infraamqp "order/pkg/infrastructure/amqp"
 )
 
 type OrderService interface {
 	CreateOrder(ctx context.Context, order appmodel.Order) (uuid.UUID, error)
+	CreateOrderAsync(ctx context.Context, order appmodel.Order) (uuid.UUID, error)
+}
+
+type ProductService interface {
+	GetPrice(ctx context.Context, productID uuid.UUID) (float64, error)
+}
+
+type PaymentService interface {
+	ProcessPayment(ctx context.Context, userID, orderID uuid.UUID, amount float64) error
+}
+
+type NotificationService interface {
+	SendNotification(ctx context.Context, userID uuid.UUID, message string) error
+}
+
+type EventPublisher interface {
+	PublishOrderCreated(ctx context.Context, event infraamqp.OrderCreatedEvent) error
 }
 
 func NewOrderService(
 	uow UnitOfWork,
+	productService ProductService,
+	paymentService PaymentService,
+	notificationService NotificationService,
+	eventPublisher EventPublisher,
 ) OrderService {
 	return &orderService{
-		uow: uow,
+		uow:                 uow,
+		productService:      productService,
+		paymentService:      paymentService,
+		notificationService: notificationService,
+		eventPublisher:      eventPublisher,
 	}
 }
 
 type orderService struct {
-	uow UnitOfWork
+	uow                 UnitOfWork
+	productService      ProductService
+	paymentService      PaymentService
+	notificationService NotificationService
+	eventPublisher      EventPublisher
 }
 
 type NoOpEventDispatcher struct{}
@@ -42,24 +72,76 @@ func (s *orderService) CreateOrder(ctx context.Context, order appmodel.Order) (u
 			return err
 		}
 
-		for _, item := range order.Items {
-			// TODO: Fetch price from product service
-			// For now, we just add items with 0 price
-			// Also, we need to handle quantity. The domain service AddItem adds one item?
-			// No, AddItem adds an item with price. It doesn't specify quantity.
-			// Wait, the domain model Item doesn't have quantity?
-			// Let's check domain model Item.
+		var totalAmount float64
 
-			// Assuming AddItem adds a single unit. If quantity > 1, we call it multiple times?
-			// Or we should update domain model.
+		for _, item := range order.Items {
+			price, err := s.productService.GetPrice(ctx, item.ProductID)
+			if err != nil {
+				return err
+			}
+
+			totalAmount += price * float64(item.Quantity)
 
 			for i := 0; i < item.Quantity; i++ {
-				_, err = domainService.AddItem(orderID, item.ProductID, 0)
+				_, err = domainService.AddItem(orderID, item.ProductID, price)
 				if err != nil {
 					return err
 				}
 			}
 		}
+
+		if err := s.paymentService.ProcessPayment(ctx, order.UserID, orderID, totalAmount); err != nil {
+			return err
+		}
+
+		// Send notification
+		// We ignore error here to not fail the order creation if notification fails,
+		// or we can log it. For now, let's just try to send it.
+		_ = s.notificationService.SendNotification(ctx, order.UserID, "Order created successfully")
+
+		return nil
+	})
+	return orderID, err
+}
+
+func (s *orderService) CreateOrderAsync(ctx context.Context, order appmodel.Order) (uuid.UUID, error) {
+	var orderID uuid.UUID
+	err := s.uow.Execute(ctx, func(provider RepositoryProvider) error {
+		domainService := service.NewOrderService(provider.OrderRepository(ctx), &NoOpEventDispatcher{})
+
+		var err error
+		orderID, err = domainService.CreateOrder(order.UserID)
+		if err != nil {
+			return err
+		}
+
+		var totalAmount float64
+
+		for _, item := range order.Items {
+			price, err := s.productService.GetPrice(ctx, item.ProductID)
+			if err != nil {
+				return err
+			}
+
+			totalAmount += price * float64(item.Quantity)
+
+			for i := 0; i < item.Quantity; i++ {
+				_, err = domainService.AddItem(orderID, item.ProductID, price)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		event := infraamqp.OrderCreatedEvent{
+			OrderID:     orderID,
+			UserID:      order.UserID,
+			TotalAmount: totalAmount,
+		}
+		if err := s.eventPublisher.PublishOrderCreated(ctx, event); err != nil {
+			return err
+		}
+
 		return nil
 	})
 	return orderID, err

@@ -1,0 +1,40 @@
+syntax = "proto3";
+package Product;
+
+option go_package = "/.;productinternal";
+
+service ProductInternalService {
+  rpc StoreProduct(StoreProductRequest) returns (StoreProductResponse);
+  rpc FindProduct(FindProductRequest) returns (FindProductResponse);
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse);
+}
+
+message StoreProductRequest {
+  Product product = 1;
+}
+
+message StoreProductResponse {
+  string productID = 1;
+}
+
+message FindProductRequest {
+  string productID = 1;
+}
+
+message FindProductResponse {
+  optional Product product = 1;
+}
+
+message ListProductsRequest {
+}
+
+message ListProductsResponse {
+    repeated Product products = 1;
+}
+
+message Product {
+  string productID = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+}

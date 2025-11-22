@@ -5,6 +5,7 @@ option go_package = "/.;orderinternal";
 
 service OrderInternalService {
   rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+  rpc CreateOrderAsync(CreateOrderRequest) returns (CreateOrderResponse);
   rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
 }
 

@@ -91,3 +91,34 @@ func (a *orderInternalAPI) GetOrder(ctx context.Context, request *orderinternal.
 		},
 	}, nil
 }
+
+func (a *orderInternalAPI) CreateOrderAsync(ctx context.Context, request *orderinternal.CreateOrderRequest) (*orderinternal.CreateOrderResponse, error) {
+	userID, err := uuid.Parse(request.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []appmodel.OrderItem
+	for _, item := range request.Items {
+		productID, err := uuid.Parse(item.ProductID)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, appmodel.OrderItem{
+			ProductID: productID,
+			Quantity:  int(item.Quantity),
+		})
+	}
+
+	orderID, err := a.orderService.CreateOrderAsync(ctx, appmodel.Order{
+		UserID: userID,
+		Items:  items,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &orderinternal.CreateOrderResponse{
+		OrderID: orderID.String(),
+	}, nil
+}
