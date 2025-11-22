@@ -1,13 +1,39 @@
 syntax = "proto3";
 package Order;
 
-option go_package = "order/api/server/orderinternal;orderinternal";
+option go_package = "/.;orderinternal";
 
 service OrderInternalService {
-  rpc Ping(PingRequest) returns (PingResponse);
+  rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
 }
 
-message PingRequest {}
-message PingResponse {
-  string message = 1;
+message CreateOrderRequest {
+  string userID = 1;
+  repeated OrderItem items = 2;
+}
+
+message OrderItem {
+  string productID = 1;
+  int32 quantity = 2;
+}
+
+message CreateOrderResponse {
+  string orderID = 1;
+}
+
+message GetOrderRequest {
+  string orderID = 1;
+}
+
+message GetOrderResponse {
+  optional Order order = 1;
+}
+
+message Order {
+  string orderID = 1;
+  string userID = 2;
+  string status = 3;
+  repeated OrderItem items = 4;
+  double totalPrice = 5;
 }

@@ -1,80 +1,64 @@
 package main
 
 import (
-	"context"
-	stdlog "log"
-	"os"
-	"os/signal"
-	"syscall"
+"context"
+"os"
+"os/signal"
+"syscall"
+"time"
 
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/urfave/cli/v2"
+applogging "gitea.xscloud.ru/xscloud/golib/pkg/application/logging"
+"gitea.xscloud.ru/xscloud/golib/pkg/infrastructure/logging"
+"github.com/urfave/cli/v2"
 )
-
-// TODO:  appID используется как префикс для env-переменных
 
 const appID = "order"
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	cnf, err := parseEnv()
-	if err != nil {
-		stdlog.Fatal(err)
-	}
-	logger, err := initLogger(cnf.LogLevel)
-	if err != nil {
-		stdlog.Fatal("failed to initialize logger")
-	}
-
-	err = runApp(ctx, cnf, logger)
-	switch errors.Cause(err) {
-	case nil:
-		logger.Infof("call finished")
-	default:
-		logger.Fatal(err)
-	}
-}
-
-func runApp(
-	ctx context.Context,
-	config *config,
-	logger *log.Logger,
-) (err error) {
-	closer := &multiCloser{}
-	defer func() {
-		if closeErr := closer.Close(); closeErr != nil {
-			err = errors.Wrap(err, closeErr.Error())
-			if err == nil {
-				err = closeErr
-			}
-		}
-	}()
+	logger := logging.NewJSONLogger(&logging.Config{AppName: appID})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = listenOSTermSignalsContext(ctx)
 
 	app := cli.App{
 		Name: appID,
-		Commands: []*cli.Command{
-			service(config, logger, closer),
-			migrate(config, logger),
+		Commands: cli.Commands{
+			migrate(logger),
+			service(logger),
 		},
 	}
 
-	return app.RunContext(ctx, os.Args)
+	err := app.RunContext(ctx, os.Args)
+	if err != nil {
+		logger.FatalError(err, "application stopped with error")
+	}
 }
 
-func initLogger(level string) (*log.Logger, error) {
-	lvl, err := log.ParseLevel(level)
-	if err != nil {
-		return nil, err
-	}
+func listenOSTermSignalsContext(ctx context.Context) context.Context {
+	var cancelFunc context.CancelFunc
+	ctx, cancelFunc = context.WithCancel(ctx)
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
+		select {
+		case <-ch:
+			cancelFunc()
+		case <-ctx.Done():
+			return
+		}
+	}()
+	return ctx
+}
 
-	logger := log.New()
-	logger.SetLevel(lvl)
-	logger.SetFormatter(&log.JSONFormatter{
-		TimestampFormat: "2006-01-02T15:04:05.000Z07:00",
-	})
+func graceCallback(ctx context.Context, logger applogging.Logger, gracePeriod time.Duration, callback func(ctx context.Context) error) {
+	go func() {
+		<-ctx.Done()
+		graceCtx, cancel := context.WithTimeout(context.Background(), gracePeriod)
+		defer cancel()
 
-	return logger, nil
+		err := callback(graceCtx)
+		if err != nil {
+			logger.Error(err, "graceful callback failed")
+		}
+	}()
 }

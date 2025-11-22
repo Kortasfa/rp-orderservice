@@ -1,44 +1,31 @@
 package main
 
 import (
-	"fmt"
-	"time"
+"time"
 
-	"github.com/kelseyhightower/envconfig"
-	"github.com/pkg/errors"
+"github.com/kelseyhightower/envconfig"
+"github.com/pkg/errors"
 )
 
-func parseEnv() (*config, error) {
-	c := new(config)
-	if err := envconfig.Process(appID, c); err != nil {
-		return nil, errors.Wrap(err, "failed to parse env")
-	}
-	return c, nil
+func parseEnvs[T any]() (T, error) {
+	var c T
+	err := envconfig.Process(appID, &c)
+	return c, errors.WithStack(err)
 }
 
-type config struct {
-	LogLevel string `envconfig:"log_level" default:"info"`
+type Service struct {
+	GracePeriod time.Duration `envconfig:"grace_period" default:"15s"`
 
-	ServeGRPCAddress string `envconfig:"serve_grpc_address" default:":8081"`
-
-	DBHost     string `envconfig:"db_host" default:"localhost"`
-	DBPort     string `envconfig:"db_port"`
-	DBName     string `envconfig:"db_name"`
-	DBUser     string `envconfig:"db_user"`
-	DBPassword string `envconfig:"db_password"`
-	DBMaxConn  int    `envconfig:"db_max_conn"`
-
-	TestGRPCAddress string `envconfig:"test_grpc_address" default:"test:8081"`
+	GRPCAddress string `envconfig:"grpc_address" default:":8081"`
+	HTTPAddress string `envconfig:"http_address" default:":8082"`
 }
 
-func (c *config) buildDSN() string {
-	return fmt.Sprintf(
-		"%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=%s",
-		c.DBUser,
-		c.DBPassword,
-		c.DBHost,
-		c.DBPort,
-		c.DBName,
-		time.UTC.String(),
-	)
+type Database struct {
+	User                  string        `envconfig:"user" required:"true"`
+	Password              string        `envconfig:"password" required:"true"`
+	Host                  string        `envconfig:"host" required:"true"`
+	Name                  string        `envconfig:"name" required:"true"`
+	MaxConnections        int           `envconfig:"max_connections" default:"20"`
+	ConnectionMaxLifeTime time.Duration `envconfig:"connection_max_life_time" default:"10m"`
+	ConnectionMaxIdleTime time.Duration `envconfig:"connection_max_idle_time" default:"1m"`
 }

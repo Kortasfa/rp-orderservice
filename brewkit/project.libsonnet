@@ -15,7 +15,6 @@ local gocache = [
 local gosources = [
     "go.mod",
     "go.sum",
-    "data",
     "cmd",
     "api",
     "pkg",
@@ -37,6 +36,7 @@ local gosources = [
                 workdir: "/app",
                 env: {
                     GOCACHE: "/app/cache/go-build",
+                    CGO_ENABLED: "0",
                 },
                 copy: copyFrom(
                     'gosources',
@@ -98,15 +98,7 @@ local gosources = [
                     GOLANGCI_LINT_CACHE: "/app/cache/go-build",
                 },
                 cache: gocache,
-                copy: [
-                    copy('.golangci.yml', '.golangci.yml'),
-                    copyFrom(
-                        'gosources',
-                        '/app',
-                        '/app'
-                    ),
-                ],
-                command: "golangci-lint run",
+                command: "golangci-lint run -v",
             },
         },
     },
