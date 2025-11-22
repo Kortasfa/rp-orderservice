@@ -19,6 +19,8 @@ type Service struct {
 	GRPCAddress string `envconfig:"grpc_address" default:":8081"`
 	HTTPAddress string `envconfig:"http_address" default:":8082"`
 
+	TemporalAddress string `envconfig:"temporal_address" default:"temporal:7233"`
+
 	ProductServiceAddress      string `envconfig:"product_service_address" default:"product-service:8081"`
 	PaymentServiceAddress      string `envconfig:"payment_service_address" default:"payment-service:8081"`
 	NotificationServiceAddress string `envconfig:"notification_service_address" default:"notification-service:8081"`
